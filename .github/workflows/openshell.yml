@@ -28,10 +28,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Determine profiles to build
         shell: bash
@@ -143,11 +141,6 @@ jobs:
                 -u "$GITHUB_ACTOR" \
                 --password-stdin
 
-      - name: Install Skopeo
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y skopeo
-
       - name: Build and push changed images
         shell: bash
         env:
@@ -173,26 +166,30 @@ jobs:
           while IFS= read -r tag; do
             echo "::group::Build ${tag}"
 
-            out="$(
-              nix build \
-                "./${ROOT}#${tag}" \
-                --no-link \
-                --print-out-paths
-            )"
-
-            docker load --input "$out"
-
             local_image="${IMAGE_NAME}:${tag}"
 
-            skopeo copy \
-              --format oci \
-              "docker-daemon:${local_image}" \
-              "docker://${image}:${tag}"
+            docker buildx build "$ROOT" \
+              --build-arg PROFILE="$tag" \
+              --load \
+              -t "$local_image"
 
-            skopeo copy \
-              --format oci \
-              "docker-daemon:${local_image}" \
-              "docker://${image}:${tag}-${short_sha}"
+            docker run --rm "$local_image" bash -lc '
+              set -eux
+              id
+              readlink -f /bin/sh
+              nix --version
+              ls /nix/var/nix/profiles/default/bin
+            '
+
+            # Same build from cache. Attestations are disabled so the tag
+            # points at a plain OCI manifest rather than an index.
+            docker buildx build "$ROOT" \
+              --build-arg PROFILE="$tag" \
+              --provenance=false \
+              --sbom=false \
+              --output type=image,oci-mediatypes=true,push=true \
+              -t "${image}:${tag}" \
+              -t "${image}:${tag}-${short_sha}"
 
             echo "::endgroup::"
           done < "$TAG_FILE"

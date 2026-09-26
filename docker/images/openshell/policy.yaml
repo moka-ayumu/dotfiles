@@ -1,0 +1,45 @@
+version: 1
+
+# Toolchains live in /nix/store, which the built-in default policy does not
+# cover. /nix is read-write so projects can install more at runtime.
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /bin
+    - /usr
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /etc
+    - /var/log
+  read_write:
+    - /nix
+    - /tmp
+    - /dev/null
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  nix:
+    name: nix
+    endpoints:
+      - { host: cache.nixos.org, port: 443 }
+      - { host: channels.nixos.org, port: 443 }
+      - { host: releases.nixos.org, port: 443 }
+      - { host: github.com, port: 443 }
+      - { host: api.github.com, port: 443 }
+      - { host: codeload.github.com, port: 443 }
+    binaries:
+      - { path: "/nix/store/**" }
+
+  npm:
+    name: npm
+    endpoints:
+      - { host: registry.npmjs.org, port: 443 }
+    binaries:
+      - { path: "/nix/store/**" }

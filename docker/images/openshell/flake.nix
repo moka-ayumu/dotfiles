@@ -1,14 +1,9 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-
-    nix-src = {
-      url = "github:NixOS/nix/2.35.2";
-      flake = false;
-    };
   };
 
-  outputs = { nixpkgs, nix-src, ... }:
+  outputs = { nixpkgs, ... }:
     let
       system = "x86_64-linux";
 
@@ -22,41 +17,13 @@
         inherit pkgs;
       };
 
-      # docker.nix puts /etc/{passwd,group,shadow,...} in as absolute symlinks
-      # into /nix/store. OpenShell's image-prep touches these files outside a
-      # chroot, so they must be real files in the image root.
-      dockerTools = pkgs.dockerTools // {
-        buildLayeredImageWithNixDb = args:
-          pkgs.dockerTools.buildLayeredImageWithNixDb (args // {
-            fakeRootCommands = (args.fakeRootCommands or "") + ''
-              find etc -type l | while IFS= read -r link; do
-                target="$(readlink "$link")"
-                case "$target" in
-                  /nix/store/*)
-                    rm "$link"
-                    cp -rL "$target" "$link"
-                    chmod -R u+w "$link"
-                    ;;
-                esac
-              done
-
-              chmod 0644 etc/passwd etc/group
-              chmod 0600 etc/shadow
-            '';
-          });
-      };
-
-      mkImage = tag: extraPkgs:
-        pkgs.callPackage "${nix-src}/docker.nix" {
-          name = "openshell";
-          inherit tag extraPkgs dockerTools;
-
-          bundleNixpkgs = false;
-
-          uid = 1000;
-          gid = 1000;
-          uname = "sandbox";
-          gname = "sandbox";
+      # Installed into /nix/var/nix/profiles/default by the Dockerfile.
+      # nix itself is included so the image does not depend on the
+      # installer's per-user profile under /sandbox.
+      mkEnv = tag: extraPkgs:
+        pkgs.buildEnv {
+          name = "openshell-${tag}";
+          paths = [ pkgs.nix ] ++ extraPkgs;
         };
 
       profileEntries = builtins.readDir ./profiles;
@@ -79,17 +46,17 @@
         in
         {
           name = tag;
-          value = mkImage tag (basePkgs ++ profilePkgs);
+          value = mkEnv tag (basePkgs ++ profilePkgs);
         };
 
-      profileImages =
+      profileEnvs =
         builtins.listToAttrs (map mkProfile profileFiles);
 
     in {
       packages.${system} =
         {
-          base = mkImage "base" basePkgs;
+          base = mkEnv "base" basePkgs;
         }
-        // profileImages;
+        // profileEnvs;
     };
 }
