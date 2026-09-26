@@ -1,0 +1,194 @@
+name: Publish OpenShell images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docker/images/openshell/**"
+      - ".github/workflows/openshell.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  ROOT: docker/images/openshell
+  IMAGE_NAME: openshell
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine profiles to build
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          TAG_FILE="$RUNNER_TEMP/openshell-tags"
+
+          get_all_profiles() {
+            echo "base"
+
+            find "$ROOT/profiles" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.nix' \
+              ! -name 'base.nix' \
+              -printf '%f\n' \
+              | sed 's/\.nix$//'
+          }
+
+          rebuild_all=false
+          tags=()
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            rebuild_all=true
+
+          elif [[ -z "${BEFORE:-}" || "$BEFORE" =~ ^0+$ ]]; then
+            rebuild_all=true
+
+          else
+            mapfile -t changed_files < <(
+              git diff --name-only "$BEFORE" "$GITHUB_SHA"
+            )
+
+            echo "Changed files:"
+            printf '  %s\n' "${changed_files[@]}"
+
+            for file in "${changed_files[@]}"; do
+              case "$file" in
+
+                "$ROOT/flake.nix" | \
+                "$ROOT/flake.lock" | \
+                "$ROOT/profiles/base.nix" | \
+                ".github/workflows/openshell.yml")
+                  rebuild_all=true
+                  ;;
+
+                "$ROOT/profiles/"*.nix)
+                  if [[ -f "$file" ]]; then
+                    tag="$(basename "$file" .nix)"
+
+                    if [[ "$tag" != "base" ]]; then
+                      tags+=("$tag")
+                    fi
+                  fi
+                  ;;
+
+                "$ROOT/"*)
+                  rebuild_all=true
+                  ;;
+              esac
+            done
+          fi
+
+          if [[ "$rebuild_all" == true ]]; then
+            mapfile -t tags < <(
+              get_all_profiles | sort -u
+            )
+          else
+            mapfile -t tags < <(
+              printf '%s\n' "${tags[@]}" | sort -u
+            )
+          fi
+
+          : > "$TAG_FILE"
+
+          for tag in "${tags[@]}"; do
+            [[ -z "$tag" ]] && continue
+
+            if [[ ! "$tag" =~ ^[a-z][a-z0-9-]*$ ]]; then
+              echo "Invalid profile/tag name: $tag"
+              exit 1
+            fi
+
+            echo "$tag" >> "$TAG_FILE"
+          done
+
+          echo
+          echo "Profiles to build:"
+
+          if [[ -s "$TAG_FILE" ]]; then
+            sed 's/^/  - /' "$TAG_FILE"
+          else
+            echo "  (none)"
+          fi
+
+      - name: Login to GHCR
+        if: ${{ hashFiles('/tmp/never-used') != 'dummy' }}
+        shell: bash
+        env:
+          GHCR_OWNER: ${{ github.repository_owner }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GHCR_TOKEN" \
+            | docker login ghcr.io \
+                -u "$GITHUB_ACTOR" \
+                --password-stdin
+
+      - name: Build and push changed images
+        shell: bash
+        env:
+          GHCR_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          TAG_FILE="$RUNNER_TEMP/openshell-tags"
+
+          if [[ ! -s "$TAG_FILE" ]]; then
+            echo "No images need rebuilding."
+            exit 0
+          fi
+
+          owner="$(
+            printf '%s' "$GHCR_OWNER" \
+              | tr '[:upper:]' '[:lower:]'
+          )"
+
+          image="ghcr.io/${owner}/${IMAGE_NAME}"
+          short_sha="${GITHUB_SHA::12}"
+
+          while IFS= read -r tag; do
+            echo "::group::Build ${tag}"
+
+            out="$(
+              nix build \
+                "./${ROOT}#${tag}" \
+                --no-link \
+                --print-out-paths
+            )"
+
+            docker load --input "$out"
+
+            local_image="${IMAGE_NAME}:${tag}"
+
+            docker tag \
+              "$local_image" \
+              "${image}:${tag}"
+
+            docker tag \
+              "$local_image" \
+              "${image}:${tag}-${short_sha}"
+
+            docker push "${image}:${tag}"
+            docker push "${image}:${tag}-${short_sha}"
+
+            echo "::endgroup::"
+          done < "$TAG_FILE"
