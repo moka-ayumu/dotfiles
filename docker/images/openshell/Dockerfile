@@ -63,6 +63,9 @@ USER root
 RUN printf '%s\n' \
         'export PATH="/nix/var/nix/profiles/default/bin:$PATH"' \
         'export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt' \
+        'for f in /nix/var/nix/profiles/default/etc/profile.d/*.sh; do' \
+        '  [ -r "$f" ] && . "$f"' \
+        'done' \
         > /etc/profile.d/nix.sh
 
 # The sandbox starts with an empty /etc/hosts, so `localhost` does not resolve
