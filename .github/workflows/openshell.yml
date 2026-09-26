@@ -143,6 +143,11 @@ jobs:
                 -u "$GITHUB_ACTOR" \
                 --password-stdin
 
+      - name: Install Skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+
       - name: Build and push changed images
         shell: bash
         env:
@@ -179,16 +184,15 @@ jobs:
 
             local_image="${IMAGE_NAME}:${tag}"
 
-            docker tag \
-              "$local_image" \
-              "${image}:${tag}"
+            skopeo copy \
+              --format oci \
+              "docker-daemon:${local_image}" \
+              "docker://${image}:${tag}"
 
-            docker tag \
-              "$local_image" \
-              "${image}:${tag}-${short_sha}"
-
-            docker push "${image}:${tag}"
-            docker push "${image}:${tag}-${short_sha}"
+            skopeo copy \
+              --format oci \
+              "docker-daemon:${local_image}" \
+              "docker://${image}:${tag}-${short_sha}"
 
             echo "::endgroup::"
           done < "$TAG_FILE"
