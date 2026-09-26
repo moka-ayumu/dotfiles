@@ -40,6 +40,12 @@ network_policies:
   npm:
     name: npm
     endpoints:
-      - { host: registry.npmjs.org, port: 443 }
+      # Scoped packages are requested as /@scope%2fname, so the encoded '/'
+      # must be allowed explicitly; that option only exists on REST endpoints.
+      - host: registry.npmjs.org
+        port: 443
+        protocol: rest
+        access: full
+        allow_encoded_slash: true
     binaries:
       - { path: "/nix/store/**" }
