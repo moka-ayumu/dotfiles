@@ -65,6 +65,11 @@ RUN printf '%s\n' \
         'export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt' \
         > /etc/profile.d/nix.sh
 
+# The sandbox starts with an empty /etc/hosts, so `localhost` does not resolve
+# (e.g. vite fails with ENOTFOUND). Docker bind-mounts its own /etc/hosts at
+# build time, so a plain RUN write is discarded; bake the file in via COPY.
+COPY hosts /etc/hosts
+
 COPY policy.yaml /etc/openshell/policy.yaml
 
 USER sandbox
