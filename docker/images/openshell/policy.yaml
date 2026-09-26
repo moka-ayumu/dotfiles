@@ -49,3 +49,20 @@ network_policies:
         allow_encoded_slash: true
     binaries:
       - { path: "/nix/store/**" }
+
+  # Claude Desktop over SSH installs its remote server and a pinned Claude Code
+  # CLI under ~/.claude/remote/{srv/<hash>/server,ccd-cli/<version>}. Only
+  # those two binaries get out; telemetry and error reporting stay blocked.
+  claude_code:
+    name: claude_code
+    endpoints:
+      - { host: api.anthropic.com, port: 443 }
+    binaries:
+      - { path: "/sandbox/.claude/remote/ccd-cli/*" }
+
+  claude_remote_server:
+    name: claude_remote_server
+    endpoints:
+      - { host: downloads.claude.ai, port: 443 }
+    binaries:
+      - { path: "/sandbox/.claude/remote/srv/*/server" }
