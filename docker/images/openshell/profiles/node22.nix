@@ -49,9 +49,18 @@ let
     export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu-24.04
     export FONTCONFIG_FILE=''${FONTCONFIG_FILE:-${fontsConf}}
   '';
+
+  # OpenShell 0.1.0's VM driver caps a sandbox at ~96 concurrent TCP relays.
+  # pnpm keeps idle keep-alive sockets open, so a default install exhausts the
+  # relays and new connections stall until idle ones close (~60s each time).
+  pnpmEnv = pkgs.writeTextDir "etc/profile.d/pnpm.sh" ''
+    export pnpm_config_network_concurrency=''${pnpm_config_network_concurrency:-16}
+    export pnpm_config_maxsockets=''${pnpm_config_maxsockets:-24}
+  '';
 in
 with pkgs; [
   nodejs_22
   pnpm
   playwrightEnv
+  pnpmEnv
 ]
