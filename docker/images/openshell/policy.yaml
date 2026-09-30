@@ -16,6 +16,9 @@ filesystem_policy:
     - /nix
     - /tmp
     - /dev/null
+    # nix builds open a pty.
+    - /dev/ptmx
+    - /dev/pts
 
 landlock:
   compatibility: best_effort
@@ -34,6 +37,7 @@ network_policies:
       - { host: github.com, port: 443 }
       - { host: api.github.com, port: 443 }
       - { host: codeload.github.com, port: 443 }
+      - { host: static.rust-lang.org, port: 443 }
     binaries:
       - { path: "/nix/store/**" }
 

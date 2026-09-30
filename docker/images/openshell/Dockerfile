@@ -29,11 +29,20 @@ RUN if id ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
 
 # Single-user Nix: no daemon, no build users. Sandbox builds are disabled
 # because neither docker build nor the OpenShell sandbox provide user namespaces.
+#
+# filter-syscalls: OpenShell already applies seccomp; nix's own filter fails to load.
+# substitute: nix sees only `lo`, assumes offline and disables the binary cache.
+# download-attempts / connect-timeout: offline mode zeroes retries, but the proxy
+#   drops its synthetic DNS mapping after ~30s (libcurl caches for 60s).
 RUN mkdir -p /etc/nix \
     && printf '%s\n' \
         'experimental-features = nix-command flakes' \
         'build-users-group =' \
         'sandbox = false' \
+        'filter-syscalls = false' \
+        'substitute = true' \
+        'download-attempts = 10' \
+        'connect-timeout = 10' \
         > /etc/nix/nix.conf
 
 ENV USER=sandbox \
@@ -60,12 +69,16 @@ RUN /sandbox/.nix-profile/bin/nix profile add \
 USER root
 
 # `openshell sandbox exec` runs `bash -lc`, which resets PATH via /etc/profile.
+# nix's own profile.d script sets NIX_SSL_CERT_FILE to the system CA, which lacks
+# the OpenShell proxy CA; point it at the injected SSL_CERT_FILE instead.
 RUN printf '%s\n' \
         'export PATH="/nix/var/nix/profiles/default/bin:$PATH"' \
-        'export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt' \
         'for f in /nix/var/nix/profiles/default/etc/profile.d/*.sh; do' \
         '  [ -r "$f" ] && . "$f"' \
         'done' \
+        'if [ -n "${SSL_CERT_FILE:-}" ]; then' \
+        '  export NIX_SSL_CERT_FILE="$SSL_CERT_FILE"' \
+        'fi' \
         > /etc/profile.d/nix.sh
 
 # The sandbox starts with an empty /etc/hosts, so `localhost` does not resolve
