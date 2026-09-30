@@ -31,19 +31,23 @@ RUN if id ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
 # because neither docker build nor the OpenShell sandbox provide user namespaces.
 #
 # filter-syscalls: OpenShell already applies seccomp; nix's own filter fails to load.
-# substitute: nix sees only `lo`, assumes offline and disables the binary cache.
-# download-attempts / connect-timeout: offline mode zeroes retries, but the proxy
-#   drops its synthetic DNS mapping after ~30s (libcurl caches for 60s).
-RUN mkdir -p /etc/nix \
+#
+# With only `lo`, nix assumes it is offline and overrides substitute,
+# download-attempts and connect-timeout unless they come from user config, which
+# /etc/xdg/nix/nix.conf counts as. Keep them on: the proxy drops its synthetic
+# DNS mapping after ~30s (libcurl caches for 60s), so downloads need retries.
+RUN mkdir -p /etc/nix /etc/xdg/nix \
     && printf '%s\n' \
         'experimental-features = nix-command flakes' \
         'build-users-group =' \
         'sandbox = false' \
         'filter-syscalls = false' \
+        > /etc/nix/nix.conf \
+    && printf '%s\n' \
         'substitute = true' \
         'download-attempts = 10' \
         'connect-timeout = 10' \
-        > /etc/nix/nix.conf
+        > /etc/xdg/nix/nix.conf
 
 ENV USER=sandbox \
     HOME=/sandbox \
